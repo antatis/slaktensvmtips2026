@@ -1974,7 +1974,7 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
 init();
 
 (function() {
-  const target = new Date('2026-06-11T19:00:00');
+  const target = new Date('2026-06-11T19:00:00Z'); // 21:00 CEST
   function tick() {
     const band = document.getElementById('countdownBand');
     if (!band) return;
