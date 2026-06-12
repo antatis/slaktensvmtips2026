@@ -514,6 +514,9 @@
         <button class="btn sm danger" onclick="clearDemoData()">↺ Rensa exempel</button>
         <span style="font-size:11px;color:var(--muted);align-self:center;">Bara lokalt – sparas inte.</span>
       </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="clearFacitBtn" class="btn sm danger" onclick="clearFacit()" style="display:none;">🧹 Rensa facit</button>
+      </div>
     </div>
 
     </div><!-- end mainView -->
@@ -565,6 +568,8 @@ async function loadSnapshots() {
     _facitRowId = facitRow ? facitRow.id : null;
     snapshots = all.filter(s => s.label !== '__FACIT__');
     updateFooter();
+    const clearBtn = document.getElementById('clearFacitBtn');
+    if (clearBtn) clearBtn.style.display = _facitRowId ? '' : 'none';
     return snapshots;
   } catch(e) { setStatus('Kunde inte hämta historik: ' + e.message, true); return []; }
 }
@@ -612,6 +617,7 @@ async function toggleAdmin() {
     adminMode = false;
     document.getElementById('adminPanel').style.display = 'none';
     if (tag) tag.style.color = '';
+    if (currentTab === 'matchday') renderMatchday();
   } else {
     const pw = prompt('Lösenord:');
     const pwHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw)))).map(b => b.toString(16).padStart(2,'0')).join('');
@@ -619,6 +625,7 @@ async function toggleAdmin() {
       adminMode = true;
       document.getElementById('adminPanel').style.display = 'block';
       if (tag) tag.style.color = 'var(--yellow)';
+      if (currentTab === 'matchday') renderMatchday();
     } else if (pw !== null) { alert('Fel lösenord.'); }
   }
 }
@@ -652,6 +659,10 @@ function extractFacit(wb) {
   return facit;
 }
 function facitOutcome(h, a) { return h > a ? '1' : (h < a ? '2' : 'X'); }
+function shortDate(dstr) {
+  const d = new Date(dstr + 'T12:00:00');
+  return d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+}
 // tip = [h, a, ...], res = [h, a] → poäng (utfall 3 + hemmamål 1 + bortamål 1).
 // Utfall härleds från målen på båda sidor (robust mot format på tip[2]).
 function matchPoints(tip, res) {
@@ -663,9 +674,92 @@ function matchPoints(tip, res) {
   return p;
 }
 function isFullhit(tip, res) { return !!(tip && res && tip[0] === res[0] && tip[1] === res[1]); }
+function calcLivePoints() {
+  const result = {};
+  VMDATA.players.forEach(name => {
+    let pts = 0;
+    const tips = VMDATA.tips[name] || {};
+    Object.keys(FACIT).forEach(n => {
+      const res = FACIT[n];
+      const tip = tips[String(n)];
+      if (tip && Array.isArray(res)) pts += matchPoints(tip, res);
+    });
+    result[name] = pts;
+  });
+  return result;
+}
+function liveCurrentData() {
+  const hasFacit = Object.keys(FACIT).length > 0;
+  if (hasFacit) {
+    const pts = calcLivePoints();
+    return Object.entries(pts).map(([name, points]) => ({ name, points }))
+      .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, 'sv'));
+  }
+  if (snapshots.length > 0) {
+    const latest = snapshots[snapshots.length - 1];
+    return Object.entries(latest.scores).map(([name, points]) => ({ name, points: Number(points) }))
+      .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, 'sv'));
+  }
+  return null;
+}
 async function saveFacit(facit) {
   if (_facitRowId) { try { await supabase('DELETE', 'snapshots?id=eq.' + _facitRowId); } catch(e) {} }
-  await supabase('POST', 'snapshots', { label: '__FACIT__', scores: facit });
+  const row = await supabase('POST', 'snapshots', { label: '__FACIT__', scores: facit });
+  if (row && row.id) _facitRowId = row.id;
+}
+async function saveMatchResult(matchNum, date) {
+  const h = parseInt(document.getElementById('res-h-' + matchNum).value, 10);
+  const a = parseInt(document.getElementById('res-a-' + matchNum).value, 10);
+  if (isNaN(h) || isNaN(a)) { setStatus('Ange giltiga heltal för båda fälten.', true); return; }
+  FACIT[matchNum] = [h, a];
+  try {
+    await saveFacit(FACIT);
+    await loadSnapshots();
+    currentData = liveCurrentData();
+    renderMatchday();
+    renderLeaderboard(currentData);
+    renderMetricCards();
+    renderFacitStats();
+    await autoSnapshotIfComplete(date);
+  } catch(e) { setStatus('Fel vid sparning: ' + e.message, true); }
+}
+async function autoSnapshotIfComplete(date) {
+  const dayMatches = matchdaySchedule().filter(m => m.d === date && m.n <= GROUP_LAST_MATCH);
+  if (!dayMatches.length) return;
+  const allDone = dayMatches.every(m => Array.isArray(FACIT[m.n]));
+  if (!allDone) return;
+  const label = shortDate(date);
+  const already = snapshots.some(s => s.label === label);
+  if (already) return;
+  const scores = calcLivePoints();
+  try {
+    await supabase('POST', 'snapshots', { label, scores });
+    await loadSnapshots();
+    currentData = liveCurrentData();
+    renderLeaderboard(currentData);
+    renderChart();
+    renderMetricCards();
+    renderTournamentStats();
+    renderFacitStats();
+    setStatus('Snapshot sparad automatiskt: ' + label);
+  } catch(e) { setStatus('Kunde inte spara auto-snapshot: ' + e.message, true); }
+}
+async function clearFacit() {
+  if (!_facitRowId) return;
+  if (!confirm('Rensa allt facit? Detta kan inte ångras.')) return;
+  try {
+    await supabase('DELETE', 'snapshots?id=eq.' + _facitRowId);
+    FACIT = {};
+    _facitRowId = null;
+    const btn = document.getElementById('clearFacitBtn');
+    if (btn) btn.style.display = 'none';
+    await loadSnapshots();
+    currentData = liveCurrentData();
+    if (currentData) { renderLeaderboard(currentData); renderMetricCards(); }
+    renderMatchday();
+    renderFacitStats();
+    setStatus('Facit rensat.');
+  } catch(e) { setStatus('Fel vid rensning: ' + e.message, true); }
 }
 // ── End Facit ───────────────────────────────────────────────────
 function parseFile(file, callback) {
@@ -838,11 +932,17 @@ function renderLeaderboard(players) {
   let prevRanks = null, dayGain = null;
   const histSnaps = (snapshots||[]).filter(s => s && s.scores);
   if (histSnaps.length >= 2) {
-    const mx = Math.max(0, ...Object.values(histSnaps[histSnaps.length-1].scores).map(Number));
-    if (mx > 0) {
-      prevRanks = snapRankMap(histSnaps[histSnaps.length-2].scores);
-      const prevS = histSnaps[histSnaps.length-2].scores, curS = histSnaps[histSnaps.length-1].scores;
-      dayGain = {}; Object.keys(curS).forEach(n => dayGain[n] = (Number(curS[n])||0) - (Number(prevS[n])||0));
+    const latestSnap = histSnaps[histSnaps.length-1];
+    const snapScores = latestSnap.scores;
+    // Only show arrows/daygain if live points exactly match latest snapshot (no live inmatning pågår)
+    const liveMatchesSnap = players.every(p => p.points === Number(snapScores[p.name]));
+    if (liveMatchesSnap) {
+      const mx = Math.max(0, ...Object.values(snapScores).map(Number));
+      if (mx > 0) {
+        prevRanks = snapRankMap(histSnaps[histSnaps.length-2].scores);
+        const prevS = histSnaps[histSnaps.length-2].scores, curS = snapScores;
+        dayGain = {}; Object.keys(curS).forEach(n => dayGain[n] = (Number(curS[n])||0) - (Number(prevS[n])||0));
+      }
     }
   }
   let rank = 1;
@@ -1034,8 +1134,7 @@ function clearDemoData() {
   if (_realSnapshots === null) { setStatus('Ingen exempeldata aktiv.'); return; }
   snapshots = _realSnapshots; _realSnapshots = null;
   FACIT = _realFacit || {}; _realFacit = null;
-  currentData = snapshots.length ? Object.entries(snapshots[snapshots.length-1].scores).map(([n,p])=>({name:n,points:p}))
-    .sort((a,b)=> b.points-a.points || a.name.localeCompare(b.name,'sv')) : [];
+  currentData = liveCurrentData() || [];
   renderLeaderboard(currentData); renderChart(); renderMetricCards(); renderTournamentStats(); renderFacitStats();
   setStatus('Exempeldata rensad – riktig data återställd.');
 }
@@ -1855,10 +1954,28 @@ function renderMatchday() {
         </span>`;
       }).join('');
 
+      const adminInput = adminMode ? (() => {
+        const existing = Array.isArray(FACIT[m.n]) ? FACIT[m.n] : null;
+        const hVal = existing ? existing[0] : '';
+        const aVal = existing ? existing[1] : '';
+        const btnStyle = existing
+          ? 'font-size:11px;padding:4px 10px;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;'
+          : 'font-size:11px;padding:4px 10px;background:var(--yellow);color:#000;border:none;border-radius:6px;cursor:pointer;font-weight:700;';
+        const btnLabel = existing ? 'Ändra' : 'Spara';
+        return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11px;color:var(--muted);flex-shrink:0;">Resultat:</span>
+          <input id="res-h-${m.n}" type="number" min="0" max="99" value="${hVal}" placeholder="H" style="width:46px;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;text-align:center;" />
+          <span style="color:var(--muted);">–</span>
+          <input id="res-a-${m.n}" type="number" min="0" max="99" value="${aVal}" placeholder="B" style="width:46px;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;text-align:center;" />
+          <button onclick="saveMatchResult(${m.n}, '${m.d}')" style="${btnStyle}">${btnLabel}</button>
+        </div>`;
+      })() : '';
+
       return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.1rem;margin-bottom:12px;">
         ${header}
         ${extra}
         <div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
+        ${adminInput}
       </div>`;
     }).join('');
     if (!matches.length) body = '<p style="padding:1.5rem;text-align:center;color:var(--muted);font-size:14px;">Inga matcher denna dag</p>';
@@ -1966,23 +2083,29 @@ async function init() {
   document.getElementById('fetchBar').style.display = 'block';
   await loadSnapshots();
   document.getElementById('fetchBar').style.display = 'none';
-  if (snapshots.length > 0) {
-    const latest = snapshots[snapshots.length - 1];
-    currentData = Object.entries(latest.scores).map(([name, points]) => ({ name, points })).sort((a,b) => b.points - a.points || a.name.localeCompare(b.name, 'sv'));
+  const liveData = liveCurrentData();
+  if (liveData) {
+    currentData = liveData;
     document.getElementById('uploadZone').style.display = 'none';
     document.getElementById('dashboard').style.display = 'block';
     renderLeaderboard(currentData); renderMetricCards(); renderChart(); renderTournamentStats(); renderFacitStats();
   }
+  let _lastFacitCount = Object.keys(FACIT).length;
   setInterval(async () => {
     if (_realSnapshots !== null) return; // exempeldata visas → pausa pollning
-    const prev = snapshots.length;
+    const prevSnaps = snapshots.length;
+    const prevFacit = _lastFacitCount;
     await loadSnapshots();
-    if (snapshots.length !== prev) {
-      renderChart(); renderMetricCards(); renderTournamentStats(); renderFacitStats();
-      if (snapshots.length > 0) {
-        const latest = snapshots[snapshots.length - 1];
-        currentData = Object.entries(latest.scores).map(([n,p])=>({name:n,points:p})).sort((a,b)=>b.points-a.points || a.name.localeCompare(b.name, 'sv'));
+    _lastFacitCount = Object.keys(FACIT).length;
+    if (snapshots.length !== prevSnaps || _lastFacitCount !== prevFacit) {
+      const live = liveCurrentData();
+      if (live) {
+        currentData = live;
         renderLeaderboard(currentData);
+        renderMetricCards();
+        renderChart();
+        renderTournamentStats();
+        renderFacitStats();
       }
     }
   }, 30000);
