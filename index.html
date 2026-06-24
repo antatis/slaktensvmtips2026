@@ -1801,7 +1801,43 @@ function renderKuriosa() {
       </div>`;
   }).join('');
 
+  // ── Fullträffstabell ────────────────────────────────────────────
+  const playedGroupMatches = Object.keys(FACIT).map(Number).filter(n => n <= GROUP_LAST_MATCH);
+  let fivePointTable = '';
+  if (playedGroupMatches.length > 0) {
+    const fiveCounts = {};
+    VMDATA.players.forEach(name => {
+      let count = 0;
+      playedGroupMatches.forEach(n => {
+        const tip = (VMDATA.tips[name]||{})[String(n)];
+        const res = FACIT[n];
+        if (tip && Array.isArray(res) && matchPoints(tip, res) === 5) count++;
+      });
+      if (count > 0) fiveCounts[name] = count;
+    });
+    const sorted5 = Object.entries(fiveCounts).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0],'sv'));
+    const medals = ['🥇','🥈','🥉'];
+    const rows5 = sorted5.length === 0
+      ? '<p style="font-size:13px;color:var(--muted);padding:12px 0;">Ingen har prickat ett exakt resultat än.</p>'
+      : sorted5.map(([name, cnt], i) => {
+          const medal = medals[i] || (i+1);
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+            <span style="font-size:13px;min-width:28px;">${medal}</span>
+            <span style="flex:1;font-size:13px;color:var(--text);">${name}</span>
+            <span style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--yellow);">${cnt}</span>
+          </div>`;
+        }).join('');
+    fivePointTable = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1.5rem;">
+      <div style="margin-bottom:10px;">
+        <span style="font-size:14px;font-weight:600;color:var(--text);">Flest fullträffar 🎯</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:8px;">Exakta resultat (5p) av ${playedGroupMatches.length} spelade matcher</span>
+      </div>
+      ${rows5}
+    </div>`;
+  }
+
   return `<p class="section-title">Gruppspel</p>
+    ${fivePointTable}
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:1.5rem;">${cards}</div>
     <p class="section-title">Wildcard-tipparen</p>
     <p style="font-size:12px;color:var(--muted);margin-bottom:12px;max-width:520px;">Vem tippar mest mot strömmen? Poäng ges för att avvika från majoritetens utfall — mest när man är ensam — plus en mindre bonus för ovanliga exakta resultat.</p>
