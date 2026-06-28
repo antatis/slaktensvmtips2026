@@ -732,8 +732,8 @@ function advancedSets() {
 function advancementPoints(player) {
   const ko = KODATA.ko[player]; if(!ko) return 0;
   const s = advancedSets(); let pts=0;
-  (ko.r32||[]).forEach(t=>{if(s.r32.has(t))pts+=ADV_POINTS.r32;});
-  (ko.r16||[]).forEach(t=>{if(s.r16.has(t))pts+=ADV_POINTS.r16;});
+  (ko.group_advance||ko.r32||[]).forEach(t=>{if(s.r32.has(t))pts+=ADV_POINTS.r32;});
+  (ko.r32||[]).forEach(t=>{if(s.r16.has(t))pts+=ADV_POINTS.r16;});
   (ko.qf||[]).forEach(t=>{if(s.qf.has(t))pts+=ADV_POINTS.qf;});
   (ko.sf||[]).forEach(t=>{if(s.sf.has(t))pts+=ADV_POINTS.sf;});
   (ko.final||[]).forEach(t=>{if(s.final.has(t))pts+=ADV_POINTS.final;});
@@ -1808,7 +1808,7 @@ function renderSlutspel() {
       const total = advancementPoints(p);
       const perRound = activeRounds.map(r => {
         const ko = KODATA.ko[p]||{};
-        const list = ko[r.key]||[];
+        const list = r.key === 'r32' ? (ko.group_advance||ko.r32||[]) : r.key === 'r16' ? (ko.r32||[]) : (ko[r.key]||[]);
         const correct = list.filter(t => s[r.key] && s[r.key].has(t)).length;
         return { key:r.key, label:r.label, correct, pts: correct * ADV_POINTS[r.key] };
       });
@@ -1818,7 +1818,7 @@ function renderSlutspel() {
     const advRows = advPts.map((p, i) => {
       const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
       const roundCols = p.perRound.map(r =>
-        `<span style="flex:1;text-align:center;font-size:12px;color:${r.pts>0?'var(--yellow)':'var(--muted)'};">${r.pts>0?`${r.correct}×${ADV_POINTS[activeRounds.find(x=>x.key===r.key).pts||0]}`:'-'}</span>`
+        `<span style="flex:1;text-align:center;font-size:12px;color:${r.pts>0?'var(--yellow)':'var(--muted)'};">${r.pts>0?`${r.correct}×${ADV_POINTS[r.key]}`:'-'}</span>`
       ).join('');
       return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
         <span style="font-size:13px;min-width:28px;">${medal}</span>
