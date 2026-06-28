@@ -746,9 +746,15 @@ function hasAdvData() { return Object.keys(ADVANCERS.r32||{}).length>0 || Object
 // ── Bonus-motor ─────────────────────────────────────────────────
 const BONUS_POINTS = [20,15,20,15,10,10,10,10];
 function normBonus(v) { return String(v==null?'':v).trim().toLowerCase(); }
-function bonusMatch(ci,ans,facit) {
-  if(ci===7){ const a=parseFloat(String(ans).replace(',','.')), f=parseFloat(String(facit).replace(',','.')); if(!isNaN(a)&&!isNaN(f)) return a===f; }
-  return normBonus(ans)===normBonus(facit);
+function bonusMatch(ci, ans, facit) {
+  if (facit==null || facit==='') return false;
+  if (ci===7) {
+    const a=parseFloat(String(ans).replace(',','.')), f=parseFloat(String(facit).replace(',','.'));
+    if (!isNaN(a)&&!isNaN(f)) return a===f;
+    return normBonus(ans)===normBonus(facit);
+  }
+  const facits = String(facit).split(',').map(normBonus).filter(x=>x);
+  return facits.includes(normBonus(ans));
 }
 function bonusPoints(player) {
   let pts=0;
@@ -1903,7 +1909,7 @@ function renderBonus() {
         `<datalist id="${listId}">${teamList.map(t=>`<option value="${t}">`).join('')}${[...new Set(VMDATA.players.map(p=>(BONUSDATA.bonus[p]||{})[cat]).filter(Boolean))].map(v=>`<option value="${v}">`).join('')}</datalist>`;
       return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
         <span style="flex:1;font-size:12px;color:var(--muted);">${BONUSDATA.labels[ci]}</span>
-        <input list="${isGoals?'':listId}" type="${isGoals?'number':'text'}" value="${current}" placeholder="Facit..." id="bonus-input-${ci}"
+        <input list="${isGoals?'':listId}" type="${isGoals?'number':'text'}" value="${current}" placeholder="${ci===7 ? 'Facit...' : 'Facit (flera = komma)...'}" id="bonus-input-${ci}"
           style="width:140px;padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;" />
         ${datalistHtml}
         <button onclick="setBonusFacit(${ci},document.getElementById('bonus-input-${ci}').value.trim())"
