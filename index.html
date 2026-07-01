@@ -538,6 +538,7 @@ const PALETTE = ['#FFE620','#4dabf7','#f06595','#a9e34b','#74c0fc','#ff8787','#6
 const SKIP_SHEETS = ['Poäng & instruktioner','Mitt slutspelsträd','Resultat & tabell','Mitt tips','Resultat & tabell (backup)','Third-place combinations'];
 
 let currentData = null, historyChart = null, currentView = 'points', adminMode = false, snapshots = [], chartFocus = null, chartHidden = new Set();
+let koTreePlayer = null;
 let FACIT = {}, _facitRowId = null, _realFacit = null;
 let ADVANCERS = { r32:{}, winners:{} }, _advRowId = null, _realAdv = null;
 let BONUSFACIT = {}, _bonusRowId = null, _realBonus = null;
@@ -742,6 +743,18 @@ function advancementPoints(player) {
   return pts;
 }
 function hasAdvData() { return Object.keys(ADVANCERS.r32||{}).length>0 || Object.keys(ADVANCERS.winners||{}).length>0; }
+function setKoTreePlayer(name) { koTreePlayer = name; renderInsights(); }
+function teamEliminated(team) {
+  const W = ADVANCERS.winners||{};
+  for (let m = 73; m <= 104; m++) {
+    if (!W[m]) continue;
+    const t = koMatchTeams(m);
+    if (t && (t[0]===team||t[1]===team) && W[m]!==team) return true;
+  }
+  const s = advancedSets();
+  if (s.r32.size >= 32 && !s.r32.has(team)) return true;
+  return false;
+}
 
 // ── Bonus-motor ─────────────────────────────────────────────────
 const BONUS_POINTS = [20,15,20,15,10,10,10,10];
@@ -1839,8 +1852,76 @@ function renderSlutspel() {
     </div>`;
   }
 
+  // ── Slutspelsträd per deltagare ────────────────────────────────
+  let koTreeBlock = '';
+  if (hasAdvData()) {
+    const treePls = VMDATA.players;
+    const treePlayer = koTreePlayer && treePls.includes(koTreePlayer) ? koTreePlayer : treePls[0];
+    const treeKo = KODATA.ko[treePlayer]||{};
+    const s = advancedSets();
+    const totalAdvPts = advancementPoints(treePlayer);
+
+    const selectOpts = treePls.map(p =>
+      `<option value="${escHtml(p)}"${p===treePlayer?' selected':''}>${escHtml(p)}</option>`
+    ).join('');
+
+    const TREE_ROUNDS = [
+      {key:'r32',   src:'group_advance', label:'Sextondelsfinal', pts:1},
+      {key:'r16',   src:'r32',           label:'Åttondelsfinal',  pts:2},
+      {key:'qf',    src:'r16',           label:'Kvartsfinal',     pts:4},
+      {key:'sf',    src:'qf',            label:'Semifinal',       pts:6},
+      {key:'bronze',src:'sf_losers',     label:'Bronsmatch',      pts:8},
+      {key:'final', src:'sf',            label:'Final',           pts:10},
+    ];
+
+    const roundSections = TREE_ROUNDS.map(r => {
+      const teams = r.src === 'group_advance'
+        ? (treeKo.group_advance||[])
+        : r.src === 'sf_losers'
+          ? (treeKo.sf||[]).filter(t => !(treeKo.final||[]).includes(t))
+          : (treeKo[r.src]||[]);
+      if (!teams.length) return '';
+      const chips = teams.map(team => {
+        const adv = s[r.key] && s[r.key].has(team);
+        const elim = !adv && teamEliminated(team);
+        let bg, color, border, extra = '';
+        if (adv) {
+          bg = 'rgba(99,230,190,0.15)'; color = '#63e6be'; border = '1px solid #63e6be';
+          extra = ` <span style="font-size:10px;opacity:0.85;">+${r.pts}p</span>`;
+        } else if (elim) {
+          bg = 'rgba(255,255,255,0.03)'; color = 'var(--muted)'; border = '1px solid rgba(255,255,255,0.08)';
+          extra = '';
+        } else {
+          bg = 'rgba(255,255,255,0.07)'; color = 'var(--text)'; border = '1px solid rgba(255,255,255,0.2)';
+          extra = '';
+        }
+        const strike = elim ? 'text-decoration:line-through;' : '';
+        return `<span style="display:inline-flex;align-items:center;gap:3px;padding:4px 9px;border-radius:20px;background:${bg};color:${color};border:${border};font-size:12px;${strike}">${escHtml(team)}${extra}</span>`;
+      }).join('');
+      return `<div style="margin-bottom:10px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;">${r.label} · ${r.pts}p</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;">${chips}</div>
+      </div>`;
+    }).join('');
+
+    koTreeBlock = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.1rem;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:var(--yellow);font-weight:500;">Slutspelsträd per deltagare 🌳</span>
+        <select onchange="setKoTreePlayer(this.value)" style="padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;">${selectOpts}</select>
+        <span style="margin-left:auto;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--yellow);">${totalAdvPts}p</span>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;margin-bottom:12px;">
+        <span style="color:#63e6be;">● Gav poäng</span>
+        <span style="color:var(--text);">● Lever än</span>
+        <span style="color:var(--muted);text-decoration:line-through;">Utslaget</span>
+      </div>
+      ${roundSections}
+    </div>`;
+  }
+
   return `<p class="section-title">Slutspel</p>
     ${advTable}
+    ${koTreeBlock}
     ${block('Ensam om sin världsmästare 🏆', uniqueRows(uniqueChamp))}
     ${block('Ensam om en finalist', uniqueRows(uniqueFin))}
     ${block('Mest mot strömmen i slutspelet <span style="color:var(--muted);font-weight:400;font-size:11px;">(gult = avvikande lag)</span>', devRows)}
