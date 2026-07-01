@@ -735,10 +735,10 @@ function advancementPoints(player) {
   const s = advancedSets(); let pts=0;
   (ko.group_advance||ko.r32||[]).forEach(t=>{if(s.r32.has(t))pts+=ADV_POINTS.r32;});
   (ko.r32||[]).forEach(t=>{if(s.r16.has(t))pts+=ADV_POINTS.r16;});
-  (ko.qf||[]).forEach(t=>{if(s.qf.has(t))pts+=ADV_POINTS.qf;});
-  (ko.sf||[]).forEach(t=>{if(s.sf.has(t))pts+=ADV_POINTS.sf;});
-  (ko.final||[]).forEach(t=>{if(s.final.has(t))pts+=ADV_POINTS.final;});
-  const bp=(ko.sf||[]).filter(t=>!(ko.final||[]).includes(t));
+  (ko.r16||[]).forEach(t=>{if(s.qf.has(t))pts+=ADV_POINTS.qf;});
+  (ko.qf||[]).forEach(t=>{if(s.sf.has(t))pts+=ADV_POINTS.sf;});
+  (ko.sf||[]).forEach(t=>{if(s.final.has(t))pts+=ADV_POINTS.final;});
+  const bp=(ko.qf||[]).filter(t=>!(ko.sf||[]).includes(t));
   bp.forEach(t=>{if(s.bronze.has(t))pts+=ADV_POINTS.bronze;});
   return pts;
 }
@@ -1821,7 +1821,15 @@ function renderSlutspel() {
       const total = advancementPoints(p);
       const perRound = activeRounds.map(r => {
         const ko = KODATA.ko[p]||{};
-        const list = r.key === 'r32' ? (ko.group_advance||ko.r32||[]) : r.key === 'r16' ? (ko.r32||[]) : (ko[r.key]||[]);
+        const listMap = {
+          r32: ko.group_advance||ko.r32||[],
+          r16: ko.r32||[],
+          qf:  ko.r16||[],
+          sf:  ko.qf||[],
+          bronze: (ko.qf||[]).filter(t=>!(ko.sf||[]).includes(t)),
+          final: ko.sf||[],
+        };
+        const list = listMap[r.key]||[];
         const correct = list.filter(t => s[r.key] && s[r.key].has(t)).length;
         return { key:r.key, label:r.label, correct, pts: correct * ADV_POINTS[r.key] };
       });
@@ -1875,11 +1883,15 @@ function renderSlutspel() {
     ];
 
     const roundSections = TREE_ROUNDS.map(r => {
-      const teams = r.src === 'group_advance'
-        ? (treeKo.group_advance||[])
-        : r.src === 'sf_losers'
-          ? (treeKo.sf||[]).filter(t => !(treeKo.final||[]).includes(t))
-          : (treeKo[r.src]||[]);
+      const srcMap = {
+        'group_advance': treeKo.group_advance||[],
+        'r32':           treeKo.r32||[],
+        'r16':           treeKo.r16||[],
+        'qf':            treeKo.qf||[],
+        'sf':            treeKo.sf||[],
+        'sf_losers':     (treeKo.qf||[]).filter(t=>!(treeKo.sf||[]).includes(t)),
+      };
+      const teams = srcMap[r.src]||[];
       if (!teams.length) return '';
       const chips = teams.map(team => {
         const adv = s[r.key] && s[r.key].has(team);
